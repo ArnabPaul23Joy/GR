@@ -1,0 +1,360 @@
+model:
+
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, models
+class Model:
+    def getModel(self):
+        # Time-series Head
+        input_ts = tf.keras.Input(shape=(100, 6))
+        input_ts = tf.reshape(input_ts, (1, 100, 6))
+        x_ts = layers.Conv1D(64, 3, padding='same', activation='relu')(input_ts)
+        x_ts = layers.BatchNormalization()(x_ts)
+        print("x_ts.shape):   ", x_ts.shape)
+
+        x_ts = layers.Conv1D(64, 5, padding='same', activation='relu')(x_ts)
+        print("x_ts.shape):   ", x_ts.shape)
+        x_ts = layers.BatchNormalization()(x_ts)
+
+        x_ts = layers.Conv1D(64, 7, padding='same', activation='relu')(x_ts)
+        x_ts = layers.BatchNormalization()(x_ts)
+        print("x_ts.shape):   ", x_ts.shape)
+
+        x_ts = layers.GlobalAveragePooling1D()(x_ts)
+        print("x_ts.shape):   ", x_ts.shape)
+
+        # Spectrogram Head
+        input_spec = tf.keras.Input(shape=(33, 5, 2, 6))
+        input_spec = tf.reshape(input_spec, (1, 33, 5, 2, 6))
+        x_spec = layers.Conv2D(64, (3, 3), padding='same', activation='relu')(input_spec)
+        
+        x_spec = layers.BatchNormalization()(x_spec)
+        x_spec = layers.MaxPooling3D(pool_size=(2, 2, 2), strides = (2, 2, 2))(x_spec)
+        print("x_spec.shape):   ", x_spec.shape)
+
+        x_spec = layers.Conv2D(64, (5, 5), padding='same', activation='relu')(x_spec)
+        x_spec = layers.BatchNormalization()(x_spec)
+        print("x_spec.shape):   ", x_spec.shape)
+        
+        x_spec = layers.MaxPooling3D(pool_size=(2, 2, 1), strides = (2, 2, 1))(x_spec)
+        x_spec = layers.Conv2D(64, (7, 7), padding='same', activation='relu')(x_spec)
+        x_spec = layers.BatchNormalization()(x_spec)
+        print("x_spec.shape):   ", x_spec.shape)
+
+        x_spec = layers.MaxPooling3D(pool_size=(2, 1, 1), strides = (2, 1, 1))(x_spec)
+        x_spec = layers.Conv2D(64, (7, 7), padding='same', activation='relu')(x_spec)
+        x_spec = layers.BatchNormalization()(x_spec)
+        print("x_spec.shape):   ", x_spec.shape)
+
+        x_spec = layers.MaxPooling3D(pool_size=(2, 1, 1), strides = (2, 1, 1))(x_spec)
+        print("x_spec.shape):   ", x_spec.shape)
+
+        x_spec = layers.GlobalAveragePooling3D()(x_spec)
+        print("x_spec.shape):   ", x_spec.shape)
+
+        # Concatenate and Final Output
+        print("x_ts.shape):   ", x_ts.shape)
+        print("x_spec.shape):   ", x_spec.shape)
+        concatenated = tf.concat([x_ts, x_spec], axis = 1)
+        print("concatenated:   ", concatenated.shape)
+        x = layers.ReLU()(concatenated)
+        print("x:   ", x.shape)
+        output = layers.Dense(8, activation='softmax')(x)
+
+        # Model
+        model = models.Model(inputs=[input_ts, input_spec], outputs=output)
+
+        # Compile the model
+        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+        model.summary()
+        return model
+
+    def trainModel(self, model, X1, X2, y):
+        model.fit([X1, X2], y, epochs = 30, batch_size = 15, validation_split = 0.2)
+        return model
+
+    def testModel(self, model, X1, X2, y):
+        val_loss, val_accuracy = model.evaluate([X1, X2], y)
+        print("val_loss, val_accuracy:   ", val_loss, "   ", val_accuracy)
+    
+    def saveModel(self, model):
+        model.save('imu_gesture_model_2.0.keras')
+
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        converter.target_spec.supported_ops = [
+            tf.lite.OpsSet.TFLITE_BUILTINS, # enable LiteRT ops.
+            tf.lite.OpsSet.SELECT_TF_OPS # enable TensorFlow ops.
+        ]
+        tflite_model = converter.convert()
+
+        # Step 3: Save the TFLite model to a file
+        with open('imu_gesture_lite_model_2.0.tflite', 'wb') as f:
+            f.write(tflite_model)
+        # f.close()
+        print("Model successfully converted to TFLite and saved as 'model.tflite'")
+    
+    def reshape_tensor(self, x_tensor, new_shape):
+        d = layers.Lambda(lambda arg: tf.keras.backend.mean(arg, axis=0), output_shape = x_tensor.shape)
+        e = d(x_tensor)
+        x_tensor = layers.Reshape(new_shape)(e)
+        print(x_tensor.shape)
+        return x_tensor
+
+    
+input:
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import stft
+class GestureInput:
+    def getInputData(self, file_name, is_shuffle):
+        imu_data = np.genfromtxt(file_name, dtype=float, encoding=None, delimiter=",")
+        data_size = imu_data.shape[0]
+
+        # print(imu_data[:,:])
+        if(is_shuffle):
+            np.random.shuffle(imu_data)
+
+        label_data = imu_data[:, 0]
+        input_data = imu_data[:, 1:]
+        # Reshape each row to 6x100
+        imu_data_reshaped = np.array([row.reshape(100, 6) for row in input_data])
+        imu_data_reshaped = self.scale_array(imu_data_reshaped, data_size)
+        
+        # If you want to maintain a 3D array (rows, 6, 100)
+        # print(imu_data_reshaped)
+        print(imu_data_reshaped.shape)
+        return label_data, imu_data_reshaped
+    
+    def getSTFT(self, inpt_data):
+        # Example signal: a sine wave that changes frequency over time
+        fs = 100  # Sampling frequency
+        # t = np.arange(0, 1, 1/fs)  # Time array
+        # print(t.size)
+        x = np.sin(2*np.pi*0.5*inpt_data) + np.sin(2*np.pi*10*inpt_data) + np.sin(2*np.pi*20*inpt_data) + np.sin(2*np.pi*50*inpt_data)  # Signal: 50Hz and 120Hz components
+
+        # Perform STFT
+        f, t_stft, Zxx = stft(x, fs, nperseg=64)
+
+        # self.plot_stft(f, t_stft, Zxx)
+        # Plot the STFT magnitude
+        
+        return f, t_stft, Zxx
+    def scale_array(self, data, rows):
+        for i in range(rows):
+            for j in range(6):
+                temp_imu_data_reshaped = data[i, :, j]
+                min_val = np.min(temp_imu_data_reshaped)
+                max_val = np.max(temp_imu_data_reshaped)
+                temp_imu_data_reshaped = (temp_imu_data_reshaped - min_val) / (max_val - min_val)
+                data[i, :, j] = temp_imu_data_reshaped
+        return data
+    def plot_stft(self, f, t_stft, Zxx):
+        plt.figure(figsize=(100, 60))
+        plt.pcolormesh(t_stft, f, np.abs(Zxx), shading='gouraud')
+        plt.title('STFT Magnitude')
+        plt.ylabel('Frequency [Hz]')
+        plt.xlabel('Time [sec]')
+        plt.colorbar(label='Magnitude')
+        plt.show()
+    def scale_stft_data(self, stft_data, rows):
+        temp_stft_data_reshaped = stft_data
+        min_val = np.min(temp_stft_data_reshaped)
+        max_val = np.max(temp_stft_data_reshaped)
+        temp_stft_data_reshaped = (temp_stft_data_reshaped - min_val) / (max_val - min_val)
+        stft_data = temp_stft_data_reshaped
+        return stft_data
+    
+data:
+    
+import numpy as np
+
+# Define the class with three NumPy arrays
+class ArrayClass:
+    def __init__(self, label, imu_data, stft_data):
+        self.label = label
+        self.imu_data = imu_data
+        self.stft_data = stft_data
+
+# Create a list to hold the objects
+
+
+train and save:
+    
+import gesture_input
+import gesture_data
+import gesture_model as GM
+import numpy as np
+import random
+from tensorflow.keras.utils import to_categorical
+
+ges_inpt = gesture_input.GestureInput()
+
+label_data, input_data= ges_inpt.getInputData('imu_data.txt', True)
+print("len(label_data):  ", len(label_data))
+# print(input_data[0, :, :].shape)
+stft_data = np.random.rand(len(label_data), 33, 5, 2, 6)
+for i in range(len(label_data)):
+    for j in range(6):
+        f, t_stft, Zxx = ges_inpt.getSTFT(input_data[i, :, j])
+        stft_data[i, :, :, 0, j] = ges_inpt.scale_stft_data(np.real(Zxx), len(label_data))
+        stft_data[i, :, :, 1, j] = ges_inpt.scale_stft_data(np.imag(Zxx), len(label_data))
+print("stft_data.shape:   ", stft_data.shape)
+
+# f, t_stft, Zxx = ges_inpt.getSTFT(input_data[0, 5, :])
+
+object_list = []
+
+# Create 1000 objects and append them to the list
+for i in range(len(label_data)):
+    array1 = label_data[i]  # Example random array1
+    array2 = input_data[i, :, :]  # Example random array2
+    array3 = stft_data[i, :, :, :, :]  # Example random array3
+    obj = gesture_data.ArrayClass(array1, array2, array3)
+    object_list.append(obj)
+
+# Shuffle the list randomly
+random.shuffle(object_list)
+entire_stack = object_list[:]
+
+split_index = int(0.75 * 1006)
+train_stack = object_list[: split_index]
+test_stack = object_list[split_index : ]
+# Initialize three empty lists to collect the arrays
+all_array1 = []
+all_array2 = []
+all_array3 = []
+
+# Extract arrays from each object and append them to the corresponding list
+for obj in entire_stack:
+    all_array1.append(obj.label)
+    all_array2.append(obj.imu_data)
+    all_array3.append(obj.stft_data)
+
+# Convert the lists of arrays to NumPy arrays
+
+entire_label_data = np.array(all_array1)
+entire_input_data = np.array(all_array2)
+entire_stft_data = np.array(all_array3)
+
+entire_label_data = entire_label_data.astype(int)
+entire_label_data = to_categorical(entire_label_data)
+
+
+
+# train_label_data = np.array(all_array1)
+# train_input_data = np.array(all_array2)
+# train_stft_data = np.array(all_array3)
+
+# train_label_data = train_label_data.astype(int)
+
+# print("Array 1 shape:", train_label_data.shape)
+# print("Array 2 shape:", train_input_data.shape)
+# print("Array 3 shape:", train_stft_data.shape)
+
+
+# all_array1 = []
+# all_array2 = []
+# all_array3 = []
+# for obj in test_stack:
+#     all_array1.append(obj.label)
+#     all_array2.append(obj.imu_data)
+#     all_array3.append(obj.stft_data)
+
+# # Convert the lists of arrays to NumPy arrays
+# test_label_data = np.array(all_array1)
+# test_input_data = np.array(all_array2)
+# test_stft_data = np.array(all_array3)
+
+# test_label_data = test_label_data.astype(int)
+
+gm_model = GM.Model()
+model = gm_model.getModel()
+model = gm_model.trainModel(model, entire_input_data, entire_stft_data, entire_label_data)
+# gm_model.testModel(model, test_input_data, test_stft_data, test_label_data)
+gm_model.saveModel(model)
+
+# Print the shapes to confirm they have been stacked properly
+# print("Array 1 shape:", test_label_data.shape)
+# print("Array 2 shape:", test_input_data.shape)    
+# print("Array 3 shape:", test_input_data.shape)
+
+
+
+# print("Array 2 shape:\n", train_label_data)
+
+
+# print("Array 2 shape:\n", test_label_data)
+
+predict:
+    
+import gesture_input
+import gesture_data
+import gesture_model as GM
+import numpy as np
+import random
+import tensorflow as tf
+from tensorflow.keras import layers, models
+
+ges_inpt = gesture_input.GestureInput()
+
+label_data, input_data= ges_inpt.getInputData('prediction_input.txt', False)
+stft_data = np.random.rand(len(label_data), 33, 5, 2, 6)
+for i in range(len(label_data)):
+    for j in range(6):
+        f, t_stft, Zxx = ges_inpt.getSTFT(input_data[i, :, j])
+        print("np.real(Zxx).shape:  ", np.real(Zxx).shape)
+        stft_data[i, :, :, 0, j] = ges_inpt.scale_stft_data(np.real(Zxx), len(label_data))
+        stft_data[i, :, :, 1, j] = ges_inpt.scale_stft_data(np.imag(Zxx), len(label_data))
+print("stft_data.shape:   ", stft_data.shape)
+print("input_data.shape:   ", input_data.shape)
+model = tf.keras.models.load_model('imu_gesture_model.keras')
+# model.summary()
+predictions = model.predict([input_data, stft_data])
+np.set_printoptions(suppress = True)
+predictions = np.argmax(predictions, axis=1)
+label_data = label_data.astype(int)
+print("predictions:", predictions)
+print("label_data: ", label_data)
+count = 0
+for i in range(len(label_data)):
+    if(predictions[i] != label_data[i]):
+        count+=1
+print("number of inaccuracies: ", count)
+count = ((len(label_data)-count)/(len(label_data) * 1.0)) * 100
+print("accuracy: % ", count)
+
+
+# try the tflite model
+
+interpreter = tf.lite.Interpreter(model_path="imu_gesture_lite_model.tflite")
+interpreter.allocate_tensors()
+
+# Get input and output tensors.
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# Test model on some input data.
+input_shape = input_details[0]['shape']
+input_shape1 = input_details[1]['shape']
+
+acc=0
+for i in range(len(label_data)):
+    input_text = np.array(input_data[i].reshape(input_shape), dtype=np.float32)
+    interpreter.set_tensor(input_details[0]['index'], input_text)
+
+    input_intent= np.array(stft_data[i].reshape(input_shape1), dtype=np.float32)
+    interpreter.set_tensor(input_details[1]['index'], input_intent)
+  
+    interpreter.invoke()
+    output_data = interpreter.get_tensor(output_details[0]['index'])
+    output_data = np.argmax(output_data)
+    print("output_data:  ", output_data)
+    if(output_data == label_data[i]):
+        acc+=1
+acc = acc/(len(label_data) * 1.0)
+print("tflite acc:  ", acc*100)
+
+

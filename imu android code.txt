@@ -1,0 +1,954 @@
+HOme activity:
+
+package com.example.myapplication.presentation;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+
+
+import com.example.myapplication.R;
+
+public class HomeActivity extends Activity {
+    private Button dataCollection;
+    private Button dataPrediction;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_home);
+        dataCollection = findViewById(R.id.collect_data);
+        dataPrediction = findViewById(R.id.predict_data);
+        dataCollection.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(HomeActivity.this, DataCollectionActivity.class));
+                finish();
+            }
+        });
+        dataPrediction.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(HomeActivity.this, DataPredictionActivity.class));
+                finish();
+            }
+        });
+    }
+}
+
+
+Collection:
+
+package com.example.myapplication.presentation;
+
+import static android.Manifest.permission.READ_EXTERNAL_STORAGE;
+import static android.Manifest.permission.WRITE_EXTERNAL_STORAGE;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.Intent;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+
+import com.example.myapplication.R;
+
+public class DataCollectionActivity extends Activity implements IMUCallback {
+    private static final String TAG = "MainActivity";
+    private EditText editText;
+    private Button button, saveButton;
+    private TextView textView;
+    private int totalCount = 0;
+    private IMUDataModel imuDataModel;
+    @SuppressLint("MissingInflatedId")
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_data_collection);
+        requestPermissions(new String[]{WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE}, 1);
+        textView = findViewById(R.id.total_count);
+        editText = findViewById(R.id.gesture_name);
+        button = findViewById(R.id.gesture_button);
+        saveButton = findViewById(R.id.save_button);
+        try{
+            imuDataModel = IMUDataModel.getInstance(DataCollectionActivity.this, DataCollectionActivity.this);
+        }catch (Exception e){
+            showToast(e.getMessage());
+            finish();
+        }
+        button.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                totalCount++;
+                imuDataModel.readIMUInput(editText.getText().toString(), true);
+            }
+        });
+        saveButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                totalCount = 0;
+                textView.setText(Integer.toString(totalCount));
+                imuDataModel.saveFile();
+            }
+        });
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+    @Override
+    public void updateViews(boolean enabled){
+        textView.setText(Integer.toString(totalCount));
+        editText.setEnabled(enabled);
+        button.setEnabled(enabled);
+        saveButton.setEnabled(enabled);
+    }
+
+    @Override
+    protected void onDestroy() {
+        imuDataModel.closeOutputWriter();
+        super.onDestroy();
+    }
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+    @Override
+    public void showToast(String text){
+        Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+    }
+}
+
+Prediction:
+
+package com.example.myapplication.presentation;
+
+import android.app.Activity;
+import android.content.res.AssetFileDescriptor;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.activity.EdgeToEdge;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
+import com.example.myapplication.R;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+
+public class DataPredictionActivity extends Activity implements IMUCallback {
+    private static final String TAG = "DataPredictionActivity";
+    private Button predictionButton;
+    private TextView outcomeText;
+    private IMUDataModel imuDataModel;
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_data_prediction);
+        predictionButton = findViewById(R.id.start_prediction);
+        outcomeText = findViewById(R.id.prediction_outcome);
+        try{
+            imuDataModel = IMUDataModel.getInstance(DataPredictionActivity.this, DataPredictionActivity.this);
+        }catch (Exception e){
+            showToast(e.getMessage());
+            finish();
+        }
+        predictionButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                imuDataModel.readIMUInput("prediction", false);
+            }
+        });
+    }
+    @Override
+    protected void onDestroy() {
+        imuDataModel.closeOutputWriter();
+        super.onDestroy();
+    }
+
+    @Override
+    public void updateViews(boolean val) {
+        if(val)
+            analyseData();
+        predictionButton.setEnabled(val);
+    }
+    @Override
+    public void showToast(String text){
+        Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+    }
+
+    private void analyseData(){
+        float [][] imuInputData = imuDataModel.getInput();
+        float[][][][] stftData = imuDataModel.getstftData(imuInputData);
+        imuInputData = imuDataModel.scaleInput(imuInputData);
+//        for (int i = 0; i < 100; i++)
+//            for (int j = 0; j < 6; j++)
+//                Log.d(TAG, "imuInput: " + String.valueOf(imuInputData[i][j]));
+
+//        for(int i=0;i<33;i++)
+//            for(int j=0;j<5;j++)
+//                for(int k = 0; k <2; k++)
+//                    for(int l = 0; l <6; l++)
+//                        Log.d(TAG, "stftInput: " + String.valueOf(stftData[i][j][k][l]));
+        IMUMLModel imumlModel = IMUMLModel.getInstance(DataPredictionActivity.this);
+        int outputVal = imumlModel.doInference(imuInputData, stftData);
+        if(outputVal == 1){
+            showToast("Scrolled down");
+            outcomeText.setText(R.string.outcome_one);
+        }
+        else if(outputVal == 2){
+            showToast("Scrolled up");
+            outcomeText.setText(R.string.outcome_two);
+        }
+        else if(outputVal == 3){
+            showToast("thumb tap");
+            outcomeText.setText(R.string.outcome_three);
+        }
+        else{
+            showToast("wrong gesture");
+            outcomeText.setText(R.string.outcome_zero);
+        }
+    }
+}
+
+
+
+IMUCallback:
+
+
+package com.example.myapplication.presentation;
+
+public interface IMUCallback {
+    void updateViews(boolean val);
+    void showToast(String text);
+}
+
+Datamodel:
+
+package com.example.myapplication.presentation;
+
+import android.content.Context;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.OutputStreamWriter;
+import java.util.ArrayList;
+import java.util.Arrays;
+
+public class IMUDataModel implements SensorEventListener {
+    private static final String TAG = "IMUDataModelService";
+    private ArrayList<Float> all_sensor_data = new ArrayList<Float>();
+    private float last_acc[] = new float[3];
+    private float last_gyro[] = new float[3];
+    private float [][] imuInputData = new float[100][6];
+    private OutputStreamWriter outputStreamWriter;
+
+    private IMUCallback imuCallback;
+    private Handler handler;
+    private int freqCount = 0;
+    private SensorManager senSensorManager;
+    private Sensor senAccelerometer, senGyroscope;
+    private static IMUDataModel imuDataModel;
+    private IMUDataModel(Context context, IMUCallback imuCallback) throws Exception {
+        initialize(context, imuCallback);
+    }
+    public void readIMUInput(String label, boolean isCollect){
+        if(!isCollect)
+            clearData();
+        imuCallback.updateViews(false);
+        handler = new Handler(Looper.getMainLooper());
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                getSamplevalue();
+                Runnable runnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        if(all_sensor_data.size() == 600) {
+                            Log.d(TAG, "freqCount:   " + freqCount);
+                            freqCount = 0;
+                            if(isCollect)
+                                writeOutputStream(label);
+                            else
+                                initializeInput();
+                            imuCallback.updateViews(true);
+                            return;
+                        }
+                        getSamplevalue();
+                        handler.postDelayed(this, 10);
+                    }
+                };
+                handler.postDelayed(runnable, 10);
+            }
+        });
+    }
+    private void initializeInput(){
+        int k = 0;
+        for(int i = 0; i < all_sensor_data.size(); ){
+            for(int j = 0; j < 6 ; j++)
+                imuInputData[k][j] = all_sensor_data.get(i + j).floatValue();
+            i = i + 6;
+            k++;
+        }
+        clearData();
+    }
+
+    public float[][] getInput(){return imuInputData;}
+
+    public float[][] scaleInput(float [][] imuData){
+        for(int j = 0; j < 6; j++){
+            float minVal = imuData[0][j];
+            float maxVal = imuData[0][j];
+            for(int i = 0; i < 100 ; i++){
+                if(imuData[i][j] < minVal)
+                    minVal = imuData[i][j];
+                else if(imuData[i][j] > maxVal)
+                    maxVal = imuData[i][j];
+            }
+            for(int i = 0; i < 100 ; i++){
+                imuData[i][j] = (imuData[i][j] - minVal) / (maxVal - minVal);
+            }
+        }
+        return imuData;
+    }
+    public static IMUDataModel getInstance(Context context, IMUCallback imuCallback) throws Exception {
+        if(imuDataModel == null)
+            imuDataModel = new IMUDataModel(context, imuCallback);
+        return imuDataModel;
+    }
+    private void initialize(Context context, IMUCallback imuCallback)throws Exception{
+        Log.d(TAG, "onStartCommand");
+        senSensorManager = (SensorManager)  context.getApplicationContext().getSystemService(Context.SENSOR_SERVICE);
+        senAccelerometer = senSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        senSensorManager.registerListener(this, senAccelerometer , SensorManager.SENSOR_DELAY_GAME);
+        senGyroscope = senSensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+        senSensorManager.registerListener(this, senGyroscope , SensorManager.SENSOR_DELAY_GAME);
+        createFile(context);
+        this.imuCallback = imuCallback;
+        for(int i=0;i<100;i++)
+            for(int j=0;j<6;j++)
+                imuInputData[i][j] = 0.0f;
+    }
+    private void createFile(Context context) throws FileNotFoundException {
+        File dir = new File(context.getApplicationContext().getFilesDir(), "gesture_data");
+        if(!dir.exists())
+            dir.mkdir();
+        File file = new File(dir, "imu_data.txt");
+        FileOutputStream fileOutputStream = new FileOutputStream(file, true);
+        outputStreamWriter = new OutputStreamWriter(fileOutputStream);
+    }
+    private void updateSensorData(SensorEvent sensorEvent){
+        Sensor mySensor = sensorEvent.sensor;
+        if (mySensor.getType() == Sensor.TYPE_GYROSCOPE) {
+            last_gyro[0] = sensorEvent.values[0];
+            last_gyro[1] = sensorEvent.values[1];
+            last_gyro[2] = sensorEvent.values[2];
+        }
+        if (mySensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+            last_acc[0] = sensorEvent.values[0];
+            last_acc[1] = sensorEvent.values[1];
+            last_acc[2] = sensorEvent.values[2];
+        }
+    }
+    public void getSamplevalue(){
+        freqCount ++;
+        all_sensor_data.add(last_gyro[0]);
+        all_sensor_data.add(last_gyro[1]);
+        all_sensor_data.add(last_gyro[2]);
+        all_sensor_data.add(last_acc[0]);
+        all_sensor_data.add(last_acc[1]);
+        all_sensor_data.add(last_acc[2]);
+    }
+    public float[][][][] getstftData(float[][] imuData){
+        float[][] tempimuData = new float[imuData.length][imuData[0].length];
+        float[] column = new float[100];
+        for(int i = 0; i < imuData.length; i++){
+            column[i] = 0.0f;
+            for(int j = 0; j < imuData[0].length; j++)
+                tempimuData[i][j] = 0.0f;
+        }
+        float[][][][] stftInput = new float[33][5][2][6];
+        for(int i=0;i<33;i++)
+            for(int j=0;j<5;j++)
+                for(int k = 0; k <2; k++)
+                    for(int l = 0; l <6; l++)
+                        stftInput[i][j][k][l] = 0.0f;
+        for(int i = 0; i < imuData.length; i++)
+            for(int j = 0;j < imuData[0].length; j++)
+                tempimuData[i][j] = imuData[i][j];
+        for(int j = 0; j < 6; j++){
+            for(int i = 0; i < 100; i++){
+                column[i] = tempimuData[i][j];
+            }
+            float[][][] stftResult = STFT.prepareData(column, 100);
+            for(int k =0 ; k < 33 ; k++)
+                for( int l = 0; l < 5; l++)
+                    for( int i = 0; i < 2; i++)
+                        stftInput[k][l][i][j] = stftResult[k][l][i];
+        }
+        Log.d(TAG, "stftInput.shape:  " + String.valueOf(stftInput.length ) + "  " + String.valueOf(stftInput[0].length) + "  " + String.valueOf(stftInput[0][0].length)+ "  " + String.valueOf(stftInput[0][0][0].length));
+//        Log.d(TAG, "stftInput[32][5][0][3]:  " + String.valueOf(stftInput[32][4][0][3]) + "  " + String.valueOf(stftInput[0].length));
+        return stftInput;
+    }
+    private void clearData(){
+        if(all_sensor_data != null && !all_sensor_data.isEmpty())
+            all_sensor_data.clear();
+    }
+    private void writeOutputStream(String sampleData) {
+        try{
+            for(float floatVal : all_sensor_data){
+                sampleData += ','+Float.toString(floatVal);
+            }
+            outputStreamWriter.append(sampleData + "\n");
+            all_sensor_data.clear();
+        }catch (Exception e){
+            imuCallback.showToast(e.getMessage());
+        }
+    }
+    public void saveFile(){
+        try{
+            if(outputStreamWriter != null)
+                outputStreamWriter.flush();
+        }catch (Exception e){
+            imuCallback.showToast(e.getMessage());
+        }
+    }
+    public void closeOutputWriter(){
+        try{
+            imuDataModel = null;
+            if(outputStreamWriter == null)
+                return;
+            outputStreamWriter.close();
+        }catch (Exception e){
+            imuCallback.showToast(e.getMessage());
+        }
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent sensorEvent) {
+        try {
+            updateSensorData(sensorEvent);
+        } catch (Exception e) {
+            imuCallback.showToast(e.getMessage());
+        }
+    }
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+}
+
+ML MOdel:
+
+package com.example.myapplication.presentation;
+
+import android.content.Context;
+import android.content.res.AssetFileDescriptor;
+import android.util.Log;
+
+import org.apache.commons.math3.analysis.function.Max;
+import org.tensorflow.lite.Interpreter;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.util.HashMap;
+import java.util.Map;
+
+public class IMUMLModel {
+    private static final String TAG = "IMUMLModel";
+    private static IMUMLModel imuMLModel;
+    private MappedByteBuffer mappedByteBuffer;
+    private IMUMLModel(Context context)throws IOException {
+        mappedByteBuffer = loadModelFile(context);
+    }
+    public static IMUMLModel getInstance(Context context){
+        try{
+            if(imuMLModel == null)
+                imuMLModel = new IMUMLModel(context);
+        }catch (Exception e){
+            Log.e(TAG, e.getMessage());
+        }
+        return imuMLModel;
+    }
+    private MappedByteBuffer loadModelFile(Context context) throws IOException {
+        AssetFileDescriptor fileDescriptor = context.getAssets().openFd("imu_gesture_lite_model_2.0.tflite");
+        FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
+        FileChannel fileChannel=inputStream.getChannel();
+        long startOffset = fileDescriptor.getStartOffset();
+        long declareLength = fileDescriptor.getDeclaredLength();
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY,startOffset,declareLength);
+    }
+    public int doInference(float[][] imuInput, float[][][][] stftInput) {
+        float[][] output=new float[1][8];
+        Object[] inputs = {imuInput, stftInput};
+        Map<Integer, Object> outputs = new HashMap<>();
+//        for(int i=0;i<100;i++)
+//            for(int j=0;j<6;j++)
+//                Log.d(TAG, "imuInput: " + String.valueOf(imuInput[i][j]));
+//
+//        for(int i=0;i<33;i++)
+//            for(int j=0;j<5;j++)
+//                for(int k = 0; k <2; k++)
+//                    for(int l = 0; l <6; l++)
+//                        Log.d(TAG, "stftInput: " + String.valueOf(stftInput[i][j][k][l]));
+        try {
+            Interpreter tflite = new Interpreter(mappedByteBuffer);
+//            tflite.getOutputTensor().shape();
+            Log.d(TAG, "tflite created!!!");
+            outputs.put(0, output);
+            tflite.runForMultipleInputsOutputs(inputs, outputs);
+            Log.d(TAG, "tflite.runForMultipleInputsOutputs!!!");
+        }catch (Exception ex){
+            Log.d(TAG, "ex.getMessage():  " + ex.getMessage());
+            ex.printStackTrace();
+        }
+        Log.d(TAG, "output:  " + String.valueOf(output[0][0]) + "  " + String.valueOf(output[0][1]));
+        int indx=0;
+        float maxVal=-1.0f;
+        for(int i=0;i<8;i++){
+            if(maxVal<output[0][i]){
+                indx = i;
+                maxVal =  output[0][i];
+            }
+        }
+        return indx;
+    }
+}
+
+
+
+STFT:
+package com.example.myapplication.presentation;
+
+
+import org.apache.commons.math3.complex.Complex;
+import org.apache.commons.math3.transform.DftNormalization;
+import org.apache.commons.math3.transform.FastFourierTransformer;
+import org.apache.commons.math3.transform.TransformType;
+import org.jtransforms.fft.DoubleFFT_1D;
+
+import java.util.Arrays;
+import java.util.IntSummaryStatistics;
+
+public class STFT {
+
+    private int windowSize;
+    private int hopSize;
+    private FastFourierTransformer fft;
+
+    public STFT(int windowSize, int hopSize) {
+        this.windowSize = windowSize;
+        this.hopSize = hopSize;
+        this.fft = new FastFourierTransformer(DftNormalization.STANDARD);
+    }
+
+    public Complex[][] transform(double[] signal) {
+        // Calculate the number of windows
+        int numWindows = (signal.length - windowSize) / hopSize + 1;
+
+        // Create an array to store the result
+        Complex[][] stftResult = new Complex[numWindows][];
+
+        // Loop over the signal in windowSize steps
+        for (int i = 0; i < numWindows; i++) {
+            // Get the current window slice
+            double[] window = new double[windowSize];
+            System.arraycopy(signal, i * hopSize, window, 0, windowSize);
+
+            // Apply the FFT to the current window
+            Complex[] fftResult = fft.transform(window, TransformType.FORWARD);
+
+            // Store the result
+            stftResult[i] = fftResult;
+        }
+
+        return stftResult;
+    }
+
+    public static float[][][] prepareData(float[] args, int sampleRate) {
+        // Example signal (sine wave)
+
+        double[] signal = new double[sampleRate];
+        for(int i=0 ; i<sampleRate; i++)
+            signal[i] = 0.0;
+        for(int i=0 ; i<sampleRate; i++)
+            signal[i] = args[i];
+
+        for (int i = 0; i < sampleRate; i++) {
+            signal[i] = Math.sin(2 * Math.PI * 0.5 * signal[i]) + Math.sin(2 * Math.PI * 10 * signal[i]) + Math.sin(2 * Math.PI * 20 * signal[i]) + Math.sin(2 * Math.PI * 50 * signal[i]);
+        }
+
+        int windowSize = 64;
+        int hopSize = 9;
+        int nfft = 64;// Replace with your actual signal
+
+// Compute STFT
+        ComplexNumber[][] result = computeSTFT(signal, windowSize, hopSize, nfft);
+// Display STFT dimensions
+        float[][][] stftResult = new float[result.length][result[0].length][2];
+
+        for (int i = 0; i < result.length; i++)
+            for (int j =0; j < result[0].length; j++)
+                for(int k=0 ; k< 2; k++)
+                    stftResult[i][j][k] = 0.0f;
+        // Print the result
+        float minReal = (float) result[0][0].real;
+        float minImag = (float) result[0][0].imag;
+        float maxReal = (float) result[0][0].real;
+        float maxImag = (float) result[0][0].imag;
+//        System.out.println("result.length " + result.length);
+//        System.out.println("result.length0 " + result[0].length);
+        for (int i = 0; i < result.length; i++) {
+            for (int j =0; j < result[0].length; j++) {
+                stftResult[i][j][0] = (float)result[i][j].real;
+                stftResult[i][j][1] = (float)result[i][j].imag;
+                if(stftResult[i][j][0] < minReal)
+                    minReal = stftResult[i][j][0];
+                else if(stftResult[i][j][0] > maxReal)
+                    maxReal = stftResult[i][j][0];
+                if(stftResult[i][j][1] < minImag)
+                    minImag = stftResult[i][j][1];
+                else if(stftResult[i][j][1] > maxImag)
+                    maxImag = stftResult[i][j][1];
+            }
+        }
+        for (int i = 0; i < result.length; i++) {
+            for (int j =0; j < result[0].length; j++) {
+                stftResult[i][j][0] = (stftResult[i][j][0] - minReal) / (maxReal - minReal);
+                stftResult[i][j][1] = (stftResult[i][j][0] - minImag) / (maxImag - minImag);
+            }
+        }
+        return stftResult;
+
+
+
+
+        // Create STFT instance
+//        int windowSize = 64;
+//        int hopSize = 9;
+//        STFT stft = new STFT(windowSize, hopSize);
+
+        // Apply STFT
+//        Complex[][]  result = stft.transform(signal);
+//        float[][][] stftResult = new float[result.length][result[0].length][2];
+//        // Print the result
+//        float minReal = (float) result[0][0].getReal();
+//        float minImag = (float) result[0][0].getImaginary();
+//        float maxReal = (float) result[0][0].getReal();
+//        float maxImag = (float) result[0][0].getImaginary();
+//        System.out.println("result.length " + result.length);
+//        System.out.println("result.length0 " + result[0].length);
+//        for (int i = 0; i < result.length; i++) {
+//            System.out.println("Window " + i + ": ");
+//            for (int j =0; j < result[i].length; j++) {
+//                stftResult[i][j][0] = (float)result[i][j].getReal();
+//                stftResult[i][j][1] = (float)result[i][j].getImaginary();
+//                if(stftResult[i][j][0] < minReal)
+//                    minReal = stftResult[i][j][0];
+//                else if(stftResult[i][j][0] > maxReal)
+//                    maxReal = stftResult[i][j][0];
+//                if(stftResult[i][j][1] < minImag)
+//                    minImag = stftResult[i][j][1];
+//                else if(stftResult[i][j][1] > maxImag)
+//                    maxImag = stftResult[i][j][1];
+//            }
+//        }
+//        for (int i = 0; i < result.length; i++) {
+//            System.out.println("Window " + i + ": ");
+//            for (int j =0; j < result[i].length; j++) {
+//                stftResult[i][j][0] = (stftResult[i][j][0] - minReal) / (maxReal - minReal);
+//                stftResult[i][j][1] = (stftResult[i][j][0] - minImag) / (maxImag - minImag);
+//            }
+//        }
+//        return stftResult;
+    }
+    static class ComplexNumber {
+        double real;
+        double imag;
+        ComplexNumber(double real, double imag) {
+            this.real = real;
+            this.imag = imag;
+        }
+        @Override
+        public String toString() {
+            return "(" + real + " + " + imag + "i)";
+        }
+    }
+    // Hann window function
+    private static double[] hannWindow(int size) {
+        double[] window = new double[size];
+        for (int i = 0; i < size; i++) {
+            window[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (size - 1)));
+        }
+        return window;
+    }
+    // STFT computation method
+    public static ComplexNumber[][] computeSTFT(double[] signal, int windowSize, int hopSize, int nfft) {
+        // Calculate number of frames
+        int numFrames = (int) Math.ceil((double) (signal.length - windowSize) / hopSize) + 1;
+        // Initialize STFT result matrix
+        int freqBins = nfft / 2 + 1;
+        ComplexNumber[][] stftMatrix = new ComplexNumber[freqBins][numFrames];
+        // Create Hann window
+        double[] window = hannWindow(windowSize);
+        // Initialize FFT transformer
+        DoubleFFT_1D fft = new DoubleFFT_1D(nfft);
+        for (int frame = 0; frame < numFrames; frame++) {
+            int startIdx = frame * hopSize;
+            double[] frameData = new double[nfft * 2]; // Real and Imaginary parts
+            // Apply window and zero-padding
+            for (int i = 0; i < windowSize; i++) {
+                if (startIdx + i < signal.length) {
+                    frameData[2 * i] = signal[startIdx + i] * window[i]; // Real part
+                    frameData[2 * i + 1] = 0.0; // Imaginary part
+                } else {
+                    frameData[2 * i] = 0.0;
+                    frameData[2 * i + 1] = 0.0;
+                }
+            }
+            // Perform FFT
+            fft.complexForward(frameData);
+            // Store positive frequency bins
+            for (int k = 0; k < freqBins; k++) {
+                double real = frameData[2 * k];
+                double imag = frameData[2 * k + 1];
+                stftMatrix[k][frame] = new ComplexNumber(real, imag);
+            }
+        }
+        return stftMatrix;
+    }
+
+}
+
+
+
+
+RES LAYOUT: HOme:
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".presentation.HomeActivity"
+    android:orientation="vertical">
+    <Button
+        android:id="@+id/collect_data"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="40dp"
+        android:text="@string/collect_data"
+        android:layout_gravity="center"
+        android:textAllCaps="false"
+        android:textSize="20dp"/>
+    <Button
+        android:id="@+id/predict_data"
+        android:layout_width="wrap_content"
+        android:layout_marginTop="20dp"
+        android:layout_height="wrap_content"
+        android:text="@string/predict_data"
+        android:layout_gravity="center"
+        android:textAllCaps="false"
+        android:textSize="20dp"/>
+</LinearLayout>
+
+
+
+
+Collection:
+
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".presentation.DataCollectionActivity"
+    android:orientation="vertical">
+    <Button
+        android:id="@+id/start_prediction"
+        android:layout_width="wrap_content"
+        android:layout_marginTop="40dp"
+        android:layout_height="wrap_content"
+        android:text="@string/start"
+        android:layout_gravity="center"
+        android:textAllCaps="false"
+        android:textSize="30dp"
+        android:background="#4E3F69">
+    </Button>
+    <TextView
+        android:id="@+id/prediction_outcome"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="15dp"
+        android:text="@string/outcome_here"
+        android:layout_gravity="center"
+        android:textAllCaps="false"
+        android:textSize="20dp"
+        android:textAlignment="center">
+
+    </TextView>
+</LinearLayout>
+
+
+
+
+
+Predictin:
+
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".presentation.DataCollectionActivity"
+    android:gravity="center"
+    android:orientation="vertical">
+    <EditText
+        android:id="@+id/gesture_name"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:hint="@string/gesture_name">
+    </EditText>
+    <TextView
+        android:id="@+id/total_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content">
+    </TextView>
+
+    <Button
+        android:id="@+id/gesture_button"
+        android:layout_width="80dp"
+        android:layout_height="30dp"
+        android:text="@string/start"
+        android:layout_gravity="center"
+        android:textAllCaps="false"
+        android:textSize="15dp"
+        android:background="#807D7D">
+    </Button>
+    <Button
+        android:id="@+id/save_button"
+        android:layout_width="80dp"
+        android:layout_height="30dp"
+        android:layout_marginTop="20dp"
+        android:text="@string/save"
+        android:layout_gravity="center"
+        android:textAllCaps="false"
+        android:textSize="15dp"
+        android:background="#807D7D">
+    </Button>
+</LinearLayout>
+
+res string:
+
+
+<resources>
+    <string name="app_name">My Application</string>
+    <!--
+    This string is used for square devices and overridden by hello_world in
+    values-round/strings.xml for round devices.
+    -->
+    <string name="hello_world">From the Square world,\nHello, %1$s!</string>
+    <string name="start">Start</string>
+    <string name="save">Save</string>
+    <string name="gesture_name">Gesture Name</string>
+    <string name="total_sample">Total Sample</string>
+    <string name="collect_data">Collect Data</string>
+    <string name="predict_data">Predict Data</string>
+    <string name="outcome_here">Outcome will show here</string>
+    <string name="outcome_zero">Wrong gesture</string>
+    <string name="outcome_one">Scrolled down</string>
+    <string name="outcome_two">Scrolled up</string>
+    <string name="outcome_three">Thump Tap</string>
+
+</resources>
+
+
+
+
+
+
+
+build.gradle:
+
+aaptOptions {
+        noCompress "imu_gesture_lite_model.tflite"
+    }
+
+
+
+manifest:
+
+
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.DeviceDefault">
+        <activity
+            android:name=".presentation.DataPredictionActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity
+            android:name=".presentation.HomeActivity"
+            android:exported="true"
+            android:taskAffinity=""
+            android:theme="@style/MainActivityTheme.Starting">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".presentation.DataCollectionActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+    </application>
+
+</manifest>
+    implementation 'org.apache.commons:commons-math3:3.6.1'
+    implementation 'org.tensorflow:tensorflow-lite:+'
+    implementation 'com.github.wendykierp:JTransforms:3.1'
+    implementation 'org.tensorflow:tensorflow-lite-select-tf-ops:+'
