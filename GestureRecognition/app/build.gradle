@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.example.gesturerecognition'
+    compileSdkPreview "VanillaIceCream"
+
+    defaultConfig {
+        applicationId "com.example.gesturerecognition"
+        minSdkPreview "VanillaIceCream"
+        targetSdkPreview "VanillaIceCream"
+        versionCode 1
+        versionName "1.0"
+
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    buildFeatures {
+        viewBinding true
+    }
+    aaptOptions {
+        noCompress "imu_gesture_lite_model.tflite"
+    }
+}
+
+dependencies {
+
+    implementation 'com.google.android.gms:play-services-wearable:18.2.0'
+    implementation 'androidx.percentlayout:percentlayout:1.0.0'
+    implementation 'androidx.legacy:legacy-support-v4:1.0.0'
+    implementation 'androidx.recyclerview:recyclerview:1.2.1'
+    implementation 'androidx.wear:wear:1.2.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.4.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.navigation:navigation-fragment:2.7.7'
+    implementation 'androidx.navigation:navigation-ui:2.7.7'
+    implementation 'org.apache.commons:commons-math3:3.6.1'
+    implementation 'org.tensorflow:tensorflow-lite:+'
+    implementation 'com.github.wendykierp:JTransforms:3.1'
+    implementation 'org.tensorflow:tensorflow-lite-select-tf-ops:+'
+}

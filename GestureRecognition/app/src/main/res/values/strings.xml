@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">GestureRecognition</string>
+    <!--
+    This string is used for square devices and overridden by hello_world in
+    values-round/strings.xml for round devices.
+    -->
+    <string name="hello_world">Hello Square World!</string>
+    <string name="start">Start</string>
+    <string name="save">Save</string>
+    <string name="gesture_name">Gesture Name</string>
+    <string name="total_sample">Total Sample</string>
+    <string name="collect_data">Collect Data</string>
+    <string name="predict_data">Predict Data</string>
+    <string name="outcome_here">Outcome will show here</string>
+    <string name="outcome_zero">Wrong gesture</string>
+    <string name="outcome_one">Scrolled down</string>
+    <string name="outcome_two">Scrolled up</string>
+    <string name="outcome_three">Thump Tap</string>
+</resources>
